@@ -1,0 +1,3 @@
+/Users/jacobedwards/University/Year2/Semester1/AOS/os/coursework/basic_shell/cmake-build-debug/CMakeFiles/basic_shell.dir
+/Users/jacobedwards/University/Year2/Semester1/AOS/os/coursework/basic_shell/cmake-build-debug/CMakeFiles/edit_cache.dir
+/Users/jacobedwards/University/Year2/Semester1/AOS/os/coursework/basic_shell/cmake-build-debug/CMakeFiles/rebuild_cache.dir
