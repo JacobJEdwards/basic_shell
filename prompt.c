@@ -5,11 +5,14 @@
 #include <unistd.h>
 #include <limits.h>
 #include <sys/wait.h>
+//#include <readline/readline.h>
+//#include <readline/history.h>
+#include <editline/readline.h>
 
 #define BUFFER_SIZE 30
 #define PROMPT_MAX_LEN (PATH_MAX + 5)
 
-#define MAX_ALIASES 1
+#define MAX_ALIASES 100
 #define MAX_ALIAS_NAME_LEN 256
 #define MAX_ALIAS_COMMAND_LEN 256
 
@@ -81,18 +84,14 @@ void expand_input(const Prompt * const p, char *buffer[]) {
 }
 
 char* get_line(const Prompt * const p) {
-    printf("%s", p->prompt);
+    // printf("%s", p->prompt);
 
     char *line = NULL;
     size_t buffer_size = 0;
 
-    if (getline(&line, &buffer_size, stdin) == -1) {
-        if (feof(stdin)) {
-            return false;
-        } else {
-            perror("error reading line");
-            return false;
-        }
+    if ((line = readline(p->prompt)) == NULL) {
+        perror("Error reading line");
+        return false;
     }
 
     return line;
@@ -144,91 +143,43 @@ char** get_input(const Prompt * const p) {
     return tokens;
 }
 
-bool _get_input(const Prompt * const p, char *buffer[], const size_t buffer_size) {
-  char str[256];
-
-  printf("%s", p->prompt);
-
-  if (fgets(str, sizeof(str), stdin) == NULL) {
-    return false; // End of input reached
-  }
-
-  const char* token;
-  char* rest = NULL;
-
-  size_t i = 0;
-
-  token = strtok_r(str, " \n", &rest); // Tokenize by space and newline
-
-  while (token != NULL) {
-    buffer[i] = strdup(token);
-    token = strtok_r(NULL, " \n", &rest);
-    i++;
-
-    if (i >= buffer_size) {
-      printf("Buffer is full.\n");
-      break;
-    }
-  }
-
-  for (size_t j = i; j < buffer_size; j++) {
-    buffer[j] = NULL;
-  }
-
-  if (i == 0) {
-      return false;
-  }
-
-  expand_input(p, buffer);
-
-  return true;
-}
-
-
 void set_prompt(Prompt * const p) {
     char buffer[PROMPT_MAX_LEN];
 
     if (getcwd(buffer, sizeof(buffer)) == NULL) {
         perror("Cwd error");
-        char* prompt = ">>> ";
+        const char * prompt = ">>> ";
         strncpy(p->prompt, prompt, sizeof(char) * strlen(prompt));
-        return;
-    }
+    } else {
 
-    if (strlen(buffer) >= PROMPT_MAX_LEN) {
-        buffer[PROMPT_MAX_LEN - 1] = '\0';
-    }
-
-    snprintf(p->prompt, PROMPT_MAX_LEN, "%s\n>>> ", buffer);
-}
-
-void free_buffer(char * buffer[], const size_t buffer_size) {
-    for (size_t i = 0; i < buffer_size; i++) {
-        if (buffer[i] != NULL) {
-            free(buffer[i]);
-            buffer[i] = NULL;
+        if (strlen(buffer) >= PROMPT_MAX_LEN) {
+            buffer[PROMPT_MAX_LEN - 1] = '\0';
         }
+
+        snprintf(p->prompt, PROMPT_MAX_LEN, "%s\n>>> ", buffer);
     }
 }
 
-void execute_external_command(char * buffer[]) {
+bool execute_external_command(char * const buffer[]) {
     pid_t child_pid = fork();
 
     if (child_pid == -1) {
         perror("Fork failed");
-        exit(1);
+        return false;
     }
 
     if (child_pid == 0) {
         if (execvp(buffer[0], buffer) == -1) {
             perror("Exec failed");
-            exit(1);
+            return false;
         }
 
     } else {
         int status;
         wait(&status);
     }
+
+    return true;
 }
 
 bool change_dir(const Prompt * const p, const char * const arg) {
@@ -237,13 +188,17 @@ bool change_dir(const Prompt * const p, const char * const arg) {
             fprintf(stderr, "cd: argument required\n");
             return false;
         } else {
-            return change_dir(p, p->home);
+            if (chdir(p->home) != 0) {
+                perror("CD Error");
+                return false;
+            }
         }
-    }
+    } else {
 
-    if (chdir(arg) != 0) {
-        perror("CD Error");
-        return false;
+        if (chdir(arg) != 0) {
+            perror("CD Error");
+            return false;
+        }
     }
 
     return true;
@@ -291,45 +246,46 @@ void set_alias(Prompt * const p, char * buffer[]) {
     p->alias_count++;
 }
 
+bool execute_command(Prompt * const p, char** tokens) {
+    if (tokens[0] == NULL) {
+        return true;
+    }
+
+    if (strcmp(tokens[0], "exit") == 0) {
+        return false;
+    }
+
+    if (strcmp(tokens[0], "unalias") == 0) {
+        free_aliases(p);
+        p->alias_count = 0;
+        return true;
+    }
+
+    if (strcmp(tokens[0], "cd") == 0) {
+        if (change_dir(p, tokens[1])) {
+            set_prompt(p);
+        }
+        return true;
+    }
+
+    if (strcmp(tokens[0], "alias") == 0) {
+        set_alias(p, tokens);
+        return true;
+    }
+
+    return execute_external_command(tokens);
+}
+
 void run(Prompt *p) {
     set_prompt(p);
     do {
         char **buffer = get_input(p);
-
-        if (buffer[0] == NULL) {
-            free(buffer);
-            continue;
-        }
-
-        if (strcmp(buffer[0], "exit") == 0) {
+        if(!execute_command(p, buffer)) {
             free(buffer);
             break;
         }
-
-        if (strcmp(buffer[0], "unalias") == 0) {
-            free(buffer);
-            free_aliases(p);
-            p->alias_count = 0;
-            continue;
-        }
-
-        if (strcmp(buffer[0], "cd") == 0) {
-            if (change_dir(p, buffer[1])) {
-                set_prompt(p);
-            }
-            free(buffer);
-            continue;
-        }
-
-        if (strcmp(buffer[0], "alias") == 0) {
-            set_alias(p, buffer);
-            free(buffer);
-            continue;
-        }
-
-        execute_external_command(buffer);
         free(buffer);
-    } while(1);
+    } while(true);
 }
 
 
